@@ -1,4 +1,4 @@
-const socket = io('http://localhost:3000');
+const socket = io('https://rave-hmx6.onrender.com');
 socket.emit('send-chat', { roomCode: 'ABC123', message: 'Hello everyone!', userName: 'Grok' });
 
 // On sync-play

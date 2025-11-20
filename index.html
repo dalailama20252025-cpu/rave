@@ -48,7 +48,7 @@
     <div id="log"></div>
 
     <script>
-        const socket = io('http://localhost:3000', { transports: ['websocket', 'polling'], timeout: 20000 });
+        const socket = io('https://rave-hmx6.onrender.com', { transports: ['websocket', 'polling'], timeout: 20000 });
         let player, playerReady = false;
         let currentQueue = [], currentIndex = 0;
 
