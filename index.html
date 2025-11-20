@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RaveClone – Full YouTube Player</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #log { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
+        button { margin: 5px; padding: 10px; cursor: pointer; }
+        input { padding: 5px; width: 200px; }
+        #player { margin: 20px 0; }
+        #queue { border: 1px solid #ddd; padding: 10px; max-height: 150px; overflow-y: auto; }
+        #queue ul { list-style: none; padding: 0; }
+        #queue li { padding: 5px; border-bottom: 1px solid #eee; cursor: pointer; }
+        #queue li.current { background: #e0f7fa; font-weight: bold; }
+        .error { color: red; }
+    </style>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>RaveClone – Dynamic YouTube Sync</h1>
+    <div>
+        <label>Your Name: <input type="text" id="userName" value="TestUser"></label>
+        <br>
+        <button id="createBtn">Create Room</button>
+        <button id="joinBtn">Join Room</button>
+        <input type="text" id="roomCode" placeholder="Enter Room Code">
+        <br>
+        <input type="text" id="videoInput" placeholder="YouTube URL or ID (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ)">
+        <button id="loadBtn">Load Video</button>
+        <button id="addQueueBtn">Add to Queue</button>
+        <br>
+        <button id="prevBtn">Previous</button>
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="nextBtn">Next</button>
+        <button id="seekBtn">Seek +10s</button>
+        <br>
+        <input type="text" id="chatMsg" placeholder="Type message...">
+        <button id="chatBtn">Send Chat</button>
+    </div>
+    <div id="player"></div>
+    <div id="queue">
+        <h3>Video Queue</h3>
+        <ul id="queueList"></ul>
+    </div>
+    <div id="log"></div>
+
+    <script>
+        const socket = io('http://localhost:3000', { transports: ['websocket', 'polling'], timeout: 20000 });
+        let player, playerReady = false;
+        let currentQueue = [], currentIndex = 0;
+
+        function log(msg, isError = false) {
+            const logDiv = document.getElementById('log');
+            const className = isError ? 'error' : '';
+            logDiv.innerHTML += `<p class="${className}">[${new Date().toLocaleTimeString()}] ${msg}</p>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(msg);
+        }
+
+        // Event Listeners
+        document.getElementById('createBtn').addEventListener('click', createRoom);
+        document.getElementById('joinBtn').addEventListener('click', joinRoom);
+        document.getElementById('loadBtn').addEventListener('click', loadVideo);
+        document.getElementById('addQueueBtn').addEventListener('click', addToQueue);
+        document.getElementById('playBtn').addEventListener('click', playMedia);
+        document.getElementById('pauseBtn').addEventListener('click', pauseMedia);
+        document.getElementById('nextBtn').addEventListener('click', nextVideo);
+        document.getElementById('prevBtn').addEventListener('click', prevVideo);
+        document.getElementById('seekBtn').addEventListener('click', seekMedia);
+        document.getElementById('chatBtn').addEventListener('click', sendChat);
+        document.getElementById('chatMsg').addEventListener('keypress', (e) => e.key === 'Enter' && sendChat());
+
+        // Parse YouTube ID from URL
+        function parseVideoId(input) {
+            const regex = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
+            const match = input.match(regex);
+            return match ? match[1] : input;  // Fallback to ID if no match
+        }
+
+        // Create/Load Video
+        function loadVideo() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Join a room first!', true);
+            const input = document.getElementById('videoInput').value.trim();
+            if (!input) return log('Enter a YouTube URL/ID!', true);
+            const videoId = parseVideoId(input);
+            socket.emit('load-media', { roomCode, media: { type: 'youtube', id: videoId }, addToQueue: false });
+            loadYouTubePlayer(videoId);
+            document.getElementById('videoInput').value = '';
+        }
+
+        function addToQueue() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Join a room first!', true);
+            const input = document.getElementById('videoInput').value.trim();
+            if (!input) return log('Enter a YouTube URL/ID!', true);
+            const videoId = parseVideoId(input);
+            socket.emit('load-media', { roomCode, media: { type: 'youtube', id: videoId }, addToQueue: true });
+            document.getElementById('videoInput').value = '';
+        }
+
+        // Queue Navigation
+        function nextVideo() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Join a room first!', true);
+            socket.emit('next-video', { roomCode });
+        }
+
+        function prevVideo() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Join a room first!', true);
+            socket.emit('prev-video', { roomCode });
+        }
+
+        // YouTube Player
+        function loadYouTubePlayer(videoId) {
+            if (typeof YT === 'undefined' || typeof YT.Player === 'undefined') {
+                const tag = document.createElement('script');
+                tag.src = "https://www.youtube.com/iframe_api";
+                const firstScriptTag = document.getElementsByTagName('script')[0];
+                firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                window.onYouTubeIframeAPIReady = () => initPlayer(videoId);
+            } else {
+                initPlayer(videoId);
+            }
+        }
+
+        function initPlayer(videoId) {
+            if (player) player.destroy();
+            player = new YT.Player('player', {
+                height: '200',
+                width: '300',
+                videoId: videoId,
+                host: 'https://www.youtube.com',
+                playerVars: {
+                    origin: 'http://localhost:3000',
+                    enablejsapi: 1,
+                    rel: 0,
+                    modestbranding: 1,
+                    playsinline: 1
+                },
+                attributes: {
+                    allow: 'autoplay; encrypted-media; accelerometer; gyroscope; picture-in-picture; clipboard-write; web-share'
+                },
+                events: {
+                    'onReady': () => { playerReady = true; log('Player Ready'); },
+                    'onError': (e) => log(`Player Error: ${e.data}`, true)
+                }
+            });
+        }
+
+        // Play/Pause/Seek/Chat (updated for queue)
+        function playMedia() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Join a room first!', true);
+            const currentTime = playerReady ? player.getCurrentTime() : 0;
+            socket.emit('play', { roomCode, currentTime });
+            if (playerReady) player.playVideo();
+        }
+
+        function pauseMedia() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Join a room first!', true);
+            socket.emit('pause', { roomCode });
+            if (playerReady) player.pauseVideo();
+        }
+
+        function seekMedia() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Join a room first!', true);
+            const newTime = (playerReady ? player.getCurrentTime() : 0) + 10;
+            socket.emit('seek', { roomCode, newTime });
+            if (playerReady) player.seekTo(newTime, true);
+        }
+
+        function sendChat() {
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            const msg = document.getElementById('chatMsg').value.trim();
+            if (!roomCode || !msg) return log('Room & message required!', true);
+            const userName = document.getElementById('userName').value;
+            socket.emit('send-chat', { roomCode, message: msg, userName });
+            document.getElementById('chatMsg').value = '';
+        }
+
+        // Update Queue UI
+        function updateQueue(queue, index) {
+            currentQueue = queue;
+            currentIndex = index;
+            const list = document.getElementById('queueList');
+            list.innerHTML = queue.map((item, i) => 
+                `<li class="${i === index ? 'current' : ''}" onclick="loadYouTubePlayer('${item.id}')">Video ${i+1}: ${item.id}</li>`
+            ).join('');
+        }
+
+        // Socket Events (updated for queue)
+        socket.on('connect', () => log('Connected!'));
+        socket.on('connect_error', (err) => log(`Connect Error: ${err.message}`, true));
+        socket.on('room-created', (data) => {
+            log(`Room created: ${data.roomCode}`);
+            document.getElementById('roomCode').value = data.roomCode;
+        });
+        socket.on('room-state', (data) => {
+            log(`Joined! Users: ${data.users.length}`);
+            if (data.media) loadYouTubePlayer(data.media.id);
+            updateQueue(data.queue, data.currentIndex);
+            if (data.isPlaying && playerReady) {
+                player.seekTo(data.currentTime, true);
+                player.playVideo();
+            }
+        });
+        socket.on('media-updated', (data) => {
+            log(`Media: ${data.media.id}`);
+            loadYouTubePlayer(data.media.id);
+            updateQueue(data.queue, data.currentIndex);
+        });
+        socket.on('sync-play', ({ currentTime, timestamp }) => {
+            if (playerReady) {
+                const offset = (Date.now() - timestamp) / 1000;
+                player.seekTo(currentTime + offset, true);
+                player.playVideo();
+            }
+            log('Synced Play');
+        });
+        socket.on('sync-pause', () => {
+            if (playerReady) player.pauseVideo();
+            log('Synced Pause');
+        });
+        socket.on('sync-seek', ({ newTime, timestamp }) => {
+            if (playerReady) {
+                const offset = (Date.now() - timestamp) / 1000;
+                player.seekTo(newTime + offset, true);
+            }
+            log(`Synced Seek: ${newTime}s`);
+        });
+        socket.on('new-chat', (data) => log(`Chat: ${data.user}: ${data.message}`));
+        socket.on('user-joined', (data) => log(`${data.name} joined`));
+        socket.on('user-left', (data) => log(`User left`));
+        socket.on('error', (data) => log(`Error: ${data.msg}`, true));
+
+        // Room Functions
+        function createRoom() {
+            const userName = document.getElementById('userName').value.trim();
+            if (!userName) return log('Enter name!', true);
+            socket.emit('create-room', { userName });
+        }
+
+        function joinRoom() {
+            const userName = document.getElementById('userName').value;
+            const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
+            if (!roomCode) return log('Enter code!', true);
+            socket.emit('join-room', { roomCode, userName });
+        }
+    </script>
+</body>
+</html>
