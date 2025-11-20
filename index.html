@@ -3,93 +3,49 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RaveClone – Synced Video Party</title>
-    <!-- Tailwind CSS CDN for modern, responsive UI -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <title>RaveClone – Full YouTube Player</title>
     <style>
-        /* Custom styles for queue and log */
-        #queue { max-height: 300px; overflow-y: auto; }
-        #queue li { transition: background-color 0.2s; }
-        #queue li:hover { background-color: rgba(59, 130, 246, 0.1); }
-        #queue li.current { background-color: #3b82f6; color: white; }
-        #log { max-height: 200px; overflow-y: auto; background-color: #f9fafb; }
-        .log-entry { margin-bottom: 4px; padding: 2px 0; }
-        .log-entry.error { color: #ef4444; }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #log { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
+        button { margin: 5px; padding: 10px; cursor: pointer; }
+        input { padding: 5px; width: 200px; }
+        #player { margin: 20px 0; }
+        #queue { border: 1px solid #ddd; padding: 10px; max-height: 150px; overflow-y: auto; }
+        #queue ul { list-style: none; padding: 0; }
+        #queue li { padding: 5px; border-bottom: 1px solid #eee; cursor: pointer; }
+        #queue li.current { background: #e0f7fa; font-weight: bold; }
+        .error { color: red; }
     </style>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col">
-    <!-- Header -->
-    <header class="bg-blue-600 text-white p-4 shadow-md">
-        <h1 class="text-2xl font-bold">RaveClone – Synced Video Party</h1>
-        <p class="text-blue-100">Host or join rooms for perfect-sync YouTube sessions</p>
-    </header>
-
-    <div class="flex flex-1 p-4 gap-4">
-        <!-- Sidebar: Controls & Chat -->
-        <aside class="w-80 bg-white rounded-lg shadow p-4 flex flex-col gap-4">
-            <!-- User & Room Section -->
-            <div class="space-y-2">
-                <label class="block text-sm font-medium text-gray-700">Your Name</label>
-                <input type="text" id="userName" value="TestUser" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <div class="flex gap-2 mt-2">
-                    <button id="createBtn" class="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition">Create Room</button>
-                    <button id="joinBtn" class="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition">Join Room</button>
-                </div>
-                <input type="text" id="roomCode" placeholder="Room Code (e.g., ABC123)" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mt-2">
-            </div>
-
-            <!-- Video Input Section -->
-            <div class="space-y-2">
-                <label class="block text-sm font-medium text-gray-700">YouTube URL or ID</label>
-                <input type="text" id="videoInput" placeholder="e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <div class="flex gap-2">
-                    <button id="loadBtn" class="flex-1 bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 transition">Load & Play</button>
-                    <button id="addQueueBtn" class="flex-1 bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition">Add to Queue</button>
-                </div>
-            </div>
-
-            <!-- Controls Section -->
-            <div class="space-y-2">
-                <h3 class="text-sm font-medium text-gray-700">Controls</h3>
-                <div class="flex gap-2 flex-wrap">
-                    <button id="prevBtn" class="bg-gray-500 text-white py-1 px-3 rounded-md hover:bg-gray-600 transition text-sm">⏮ Prev</button>
-                    <button id="playBtn" class="bg-green-500 text-white py-1 px-3 rounded-md hover:bg-green-600 transition text-sm">▶ Play</button>
-                    <button id="pauseBtn" class="bg-orange-500 text-white py-1 px-3 rounded-md hover:bg-orange-600 transition text-sm">⏸ Pause</button>
-                    <button id="nextBtn" class="bg-gray-500 text-white py-1 px-3 rounded-md hover:bg-gray-600 transition text-sm">⏭ Next</button>
-                    <button id="seekBtn" class="bg-blue-500 text-white py-1 px-3 rounded-md hover:bg-blue-600 transition text-sm">+10s</button>
-                </div>
-            </div>
-
-            <!-- Chat Section -->
-            <div class="space-y-2 flex-1">
-                <h3 class="text-sm font-medium text-gray-700">Chat</h3>
-                <input type="text" id="chatMsg" placeholder="Type message..." class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <button id="chatBtn" class="w-full bg-gray-600 text-white py-2 rounded-md hover:bg-gray-700 transition">Send</button>
-            </div>
-        </aside>
-
-        <!-- Main: Player & Queue -->
-        <main class="flex-1 bg-white rounded-lg shadow p-4 flex flex-col gap-4">
-            <!-- Player -->
-            <div class="flex justify-center">
-                <div id="player" class="w-full max-w-2xl aspect-video bg-black rounded-lg"></div>
-            </div>
-
-            <!-- Queue -->
-            <div id="queue" class="space-y-2">
-                <h3 class="text-lg font-medium text-gray-700">Video Queue</h3>
-                <ul id="queueList" class="space-y-1"></ul>
-                <p id="emptyQueue" class="text-gray-500 italic hidden">No videos in queue yet.</p>
-            </div>
-
-            <!-- Log (Bottom) -->
-            <div id="log" class="bg-gray-50 rounded-md p-3">
-                <h4 class="text-sm font-medium text-gray-600 mb-2">Activity Log</h4>
-                <div id="logContent"></div>
-            </div>
-        </main>
+<body>
+    <h1>RaveClone – Dynamic YouTube Sync</h1>
+    <div>
+        <label>Your Name: <input type="text" id="userName" value="TestUser"></label>
+        <br>
+        <button id="createBtn">Create Room</button>
+        <button id="joinBtn">Join Room</button>
+        <input type="text" id="roomCode" placeholder="Enter Room Code">
+        <br>
+        <input type="text" id="videoInput" placeholder="YouTube URL or ID (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ)">
+        <button id="loadBtn">Load Video</button>
+        <button id="addQueueBtn">Add to Queue</button>
+        <br>
+        <button id="prevBtn">Previous</button>
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="nextBtn">Next</button>
+        <button id="seekBtn">Seek +10s</button>
+        <br>
+        <input type="text" id="chatMsg" placeholder="Type message...">
+        <button id="chatBtn">Send Chat</button>
     </div>
+    <div id="player"></div>
+    <div id="queue">
+        <h3>Video Queue</h3>
+        <ul id="queueList"></ul>
+    </div>
+    <div id="log"></div>
 
     <script>
         const socket = io('https://rave-hmx6.onrender.com', { transports: ['websocket', 'polling'], timeout: 20000 });
@@ -97,39 +53,34 @@
         let currentQueue = [], currentIndex = 0;
 
         function log(msg, isError = false) {
-            const logContent = document.getElementById('logContent');
+            const logDiv = document.getElementById('log');
             const className = isError ? 'error' : '';
-            logContent.innerHTML += `<div class="log-entry ${className} text-sm">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
-            logContent.scrollTop = logContent.scrollHeight;
+            logDiv.innerHTML += `<p class="${className}">[${new Date().toLocaleTimeString()}] ${msg}</p>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
             console.log(msg);
         }
 
-        // Event Listeners (CSP-safe)
-        document.querySelectorAll('button[id]').forEach(btn => {
-            const id = btn.id;
-            const handlers = {
-                createBtn: createRoom,
-                joinBtn: joinRoom,
-                loadBtn: loadVideo,
-                addQueueBtn: addToQueue,
-                playBtn: playMedia,
-                pauseBtn: pauseMedia,
-                nextBtn: nextVideo,
-                prevBtn: prevVideo,
-                seekBtn: seekMedia,
-                chatBtn: sendChat
-            };
-            if (handlers[id]) btn.addEventListener('click', handlers[id]);
-        });
+        // Event Listeners
+        document.getElementById('createBtn').addEventListener('click', createRoom);
+        document.getElementById('joinBtn').addEventListener('click', joinRoom);
+        document.getElementById('loadBtn').addEventListener('click', loadVideo);
+        document.getElementById('addQueueBtn').addEventListener('click', addToQueue);
+        document.getElementById('playBtn').addEventListener('click', playMedia);
+        document.getElementById('pauseBtn').addEventListener('click', pauseMedia);
+        document.getElementById('nextBtn').addEventListener('click', nextVideo);
+        document.getElementById('prevBtn').addEventListener('click', prevVideo);
+        document.getElementById('seekBtn').addEventListener('click', seekMedia);
+        document.getElementById('chatBtn').addEventListener('click', sendChat);
         document.getElementById('chatMsg').addEventListener('keypress', (e) => e.key === 'Enter' && sendChat());
 
-        // Parse YouTube ID
+        // Parse YouTube ID from URL
         function parseVideoId(input) {
             const regex = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
-            return input.match(regex)?.[1] || input;
+            const match = input.match(regex);
+            return match ? match[1] : input;  // Fallback to ID if no match
         }
 
-        // Video Functions
+        // Create/Load Video
         function loadVideo() {
             const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
             if (!roomCode) return log('Join a room first!', true);
@@ -151,6 +102,7 @@
             document.getElementById('videoInput').value = '';
         }
 
+        // Queue Navigation
         function nextVideo() {
             const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
             if (!roomCode) return log('Join a room first!', true);
@@ -179,8 +131,8 @@
         function initPlayer(videoId) {
             if (player) player.destroy();
             player = new YT.Player('player', {
-                height: '315',  // Aspect ratio friendly
-                width: '560',
+                height: '200',
+                width: '300',
                 videoId: videoId,
                 host: 'https://www.youtube.com',
                 playerVars: {
@@ -194,13 +146,13 @@
                     allow: 'autoplay; encrypted-media; accelerometer; gyroscope; picture-in-picture; clipboard-write; web-share'
                 },
                 events: {
-                    'onReady': () => { playerReady = true; log('Player ready for ' + videoId); },
+                    'onReady': () => { playerReady = true; log('Player Ready'); },
                     'onError': (e) => log(`Player Error: ${e.data}`, true)
                 }
             });
         }
 
-        // Controls
+        // Play/Pause/Seek/Chat (updated for queue)
         function playMedia() {
             const roomCode = document.getElementById('roomCode').value.toUpperCase().trim();
             if (!roomCode) return log('Join a room first!', true);
@@ -238,20 +190,55 @@
             currentQueue = queue;
             currentIndex = index;
             const list = document.getElementById('queueList');
-            const empty = document.getElementById('emptyQueue');
-            if (queue.length === 0) {
-                list.innerHTML = '';
-                empty.classList.remove('hidden');
-            } else {
-                empty.classList.add('hidden');
-                list.innerHTML = queue.map((item, i) => 
-                    `<li class="p-2 rounded-md ${i === index ? 'current' : ''} flex items-center gap-2 cursor-pointer" onclick="loadYouTubePlayer('${item.id}')">
-                        <span class="text-sm font-medium">Video ${i+1}</span>
-                        <span class="text-xs text-gray-500 flex-1 truncate">ID: ${item.id}</span>
-                    </li>`
-                ).join('');
-            }
+            list.innerHTML = queue.map((item, i) => 
+                `<li class="${i === index ? 'current' : ''}" onclick="loadYouTubePlayer('${item.id}')">Video ${i+1}: ${item.id}</li>`
+            ).join('');
         }
+
+        // Socket Events (updated for queue)
+        socket.on('connect', () => log('Connected!'));
+        socket.on('connect_error', (err) => log(`Connect Error: ${err.message}`, true));
+        socket.on('room-created', (data) => {
+            log(`Room created: ${data.roomCode}`);
+            document.getElementById('roomCode').value = data.roomCode;
+        });
+        socket.on('room-state', (data) => {
+            log(`Joined! Users: ${data.users.length}`);
+            if (data.media) loadYouTubePlayer(data.media.id);
+            updateQueue(data.queue, data.currentIndex);
+            if (data.isPlaying && playerReady) {
+                player.seekTo(data.currentTime, true);
+                player.playVideo();
+            }
+        });
+        socket.on('media-updated', (data) => {
+            log(`Media: ${data.media.id}`);
+            loadYouTubePlayer(data.media.id);
+            updateQueue(data.queue, data.currentIndex);
+        });
+        socket.on('sync-play', ({ currentTime, timestamp }) => {
+            if (playerReady) {
+                const offset = (Date.now() - timestamp) / 1000;
+                player.seekTo(currentTime + offset, true);
+                player.playVideo();
+            }
+            log('Synced Play');
+        });
+        socket.on('sync-pause', () => {
+            if (playerReady) player.pauseVideo();
+            log('Synced Pause');
+        });
+        socket.on('sync-seek', ({ newTime, timestamp }) => {
+            if (playerReady) {
+                const offset = (Date.now() - timestamp) / 1000;
+                player.seekTo(newTime + offset, true);
+            }
+            log(`Synced Seek: ${newTime}s`);
+        });
+        socket.on('new-chat', (data) => log(`Chat: ${data.user}: ${data.message}`));
+        socket.on('user-joined', (data) => log(`${data.name} joined`));
+        socket.on('user-left', (data) => log(`User left`));
+        socket.on('error', (data) => log(`Error: ${data.msg}`, true));
 
         // Room Functions
         function createRoom() {
@@ -266,51 +253,6 @@
             if (!roomCode) return log('Enter code!', true);
             socket.emit('join-room', { roomCode, userName });
         }
-
-        // Socket Events
-        socket.on('connect', () => log('Connected to server!'));
-        socket.on('connect_error', (err) => log(`Connection failed: ${err.message}`, true));
-        socket.on('room-created', (data) => {
-            log(`Room created: ${data.roomCode}`);
-            document.getElementById('roomCode').value = data.roomCode;
-        });
-        socket.on('room-state', (data) => {
-            log(`Joined room! ${data.users.length} users`);
-            if (data.media) loadYouTubePlayer(data.media.id);
-            updateQueue(data.queue || [], data.currentIndex || 0);
-            if (data.isPlaying && playerReady) {
-                player.seekTo(data.currentTime, true);
-                player.playVideo();
-            }
-        });
-        socket.on('media-updated', (data) => {
-            log(`Loaded: ${data.media.id}`);
-            loadYouTubePlayer(data.media.id);
-            updateQueue(data.queue || [], data.currentIndex || 0);
-        });
-        socket.on('sync-play', ({ currentTime, timestamp }) => {
-            if (playerReady) {
-                const offset = (Date.now() - timestamp) / 1000;
-                player.seekTo(currentTime + offset, true);
-                player.playVideo();
-            }
-            log('Synced: Playing');
-        });
-        socket.on('sync-pause', () => {
-            if (playerReady) player.pauseVideo();
-            log('Synced: Paused');
-        });
-        socket.on('sync-seek', ({ newTime, timestamp }) => {
-            if (playerReady) {
-                const offset = (Date.now() - timestamp) / 1000;
-                player.seekTo(newTime + offset, true);
-            }
-            log(`Synced: Seek to ${newTime}s`);
-        });
-        socket.on('new-chat', (data) => log(`${data.user}: ${data.message}`));
-        socket.on('user-joined', (data) => log(`${data.name} joined!`));
-        socket.on('user-left', (data) => log('User left'));
-        socket.on('error', (data) => log(`Error: ${data.msg}`, true));
     </script>
 </body>
 </html>
