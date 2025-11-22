@@ -15,10 +15,6 @@ const io = socketIo(server, {
 });
 
 // Middleware
-// Custom Helmet with relaxed CSP for dev (external scripts + inline)
-// Custom Helmet with full CSP for dev (allows CDNs, inline handlers as fallback, source maps)
-// Custom Helmet with Permissions Policy for YouTube
-// Custom Helmet with full CSP for YouTube (including frames)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -28,7 +24,8 @@ app.use(helmet({
         "'unsafe-inline'",
         "https://cdn.socket.io",
         "https://www.youtube.com",
-        "https://www.gstatic.com"
+        "https://www.gstatic.com",
+        "https://sdk.scdn.co"  // Spotify SDK
       ],
       scriptSrcAttr: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
@@ -37,9 +34,10 @@ app.use(helmet({
         "http://localhost:3000",
         "ws://localhost:3000",
         "https://cdn.socket.io",
-        "https://www.youtube.com"
+        "https://www.youtube.com",
+        "https://api.spotify.com"  // Spotify API
       ],
-      frameSrc: [  // New: Allows YouTube iframes
+      frameSrc: [
         "'self'",
         "https://www.youtube.com"
       ],
@@ -62,40 +60,42 @@ app.use(helmet({
   },
   hsts: false
 }));
-// app.use((req, res, next) => {
-//   res.set('Permissions-Policy', [
-//     'autoplay=(self "https://www.youtube.com")',
-//     'encrypted-media=(self "https://www.youtube.com")',
-//     'accelerometer=(self)',
-//     'gyroscope=(self)',
-//     'picture-in-picture=(self "https://www.youtube.com")',
-//     'clipboard-write=(self)',
-//     'web-share=(self)'
-//   ].join('; '));
-//   next();
-// });
-app.use(compression()); // Performance
-app.use(cors()); // Cross-OS/browser
-app.use(express.json()); // Body parsing
-app.use(express.static(__dirname));  // Serves index.html from the folder
-app.use(express.static('.'));  // Serves index.html and other files
+app.use(compression());
+app.use(cors());
+app.use(express.json());
+app.use(express.static(__dirname));  // Serves index.html
 
-// Optional Redis Adapter for Multi-Server Scaling
+// Manual Permissions-Policy for YouTube/Spotify
+app.use((req, res, next) => {
+  res.set('Permissions-Policy', [
+    'autoplay=(self "https://www.youtube.com")',
+    'encrypted-media=(self "https://www.youtube.com")',
+    'accelerometer=(self)',
+    'gyroscope=(self)',
+    'picture-in-picture=(self "https://www.youtube.com")',
+    'clipboard-write=(self)',
+    'web-share=(self)'
+  ].join('; '));
+  next();
+});
+
+// Spotify Config Route (Educational: Replace with your Client ID)
+app.get('/spotify-config', (req, res) => res.json({ clientId: 'your_spotify_client_id_here' }));
+
+// Optional Redis Adapter
 let redisAdapter;
 let redisClient;
 if (process.env.REDIS_URL) {
   redisClient = Redis.createClient({ url: process.env.REDIS_URL });
   redisClient.connect().catch(console.error);
-  redisAdapter = new (require('socket.io-redis'))({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: 6379
-  });
+  const { createAdapter } = require('socket.io-redis');
+  redisAdapter = createAdapter({ host: process.env.REDIS_HOST || 'localhost', port: 6379 });
   io.adapter(redisAdapter);
 }
 
-// In-Memory Storage (Use Redis in prod)
-const rooms = new Map(); // { roomCode: { hostId, media: {type: 'youtube|spotify', id: '...'}, users: [] } }
-const generateRoomCode = () => Math.random().toString(36).substring(2, 8).toUpperCase(); // e.g., ABC123
+// In-Memory Storage
+const rooms = new Map();
+const generateRoomCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 // Socket Connection
 io.on('connection', (socket) => {
@@ -115,8 +115,8 @@ io.on('connection', (socket) => {
     // Send room state to new user
     socket.emit('room-state', {
       media: room.media,
-      queue: room.queue,  // New
-      currentIndex: room.currentIndex,  // New
+      queue: room.queue,
+      currentIndex: room.currentIndex,
       isPlaying: room.isPlaying,
       currentTime: room.currentTime,
       hostId: room.hostId,
@@ -135,9 +135,9 @@ io.on('connection', (socket) => {
 
     rooms.set(roomCode, {
       hostId: socket.id,
-      media: null,  // Current video
-      queue: [],    // New: Array of {type: 'youtube', id: '...'}
-      currentIndex: 0,  // Queue position
+      media: null,
+      queue: [],
+      currentIndex: 0,
       isPlaying: false,
       currentTime: 0,
       users: [{ id: socket.id, name: userName }]
@@ -148,10 +148,10 @@ io.on('connection', (socket) => {
     console.log(`${userName} created ${roomCode}`);
   });
 
-  // Load Media (YouTube/Spotify)
-  socket.on('load-media', ({ roomCode, media, addToQueue = false }) => {  // New param
+  // Load Media (YouTube/Spotify support)
+  socket.on('load-media', ({ roomCode, media, addToQueue = false }) => {
     if (!rooms.has(roomCode) || !socket.rooms.has(roomCode)) return;
-    if (rooms.get(roomCode).hostId !== socket.id) return;
+    if (rooms.get(roomCode).hostId !== socket.id) return; // Host only
 
     const room = rooms.get(roomCode);
     if (addToQueue) {
@@ -159,25 +159,26 @@ io.on('connection', (socket) => {
     } else {
       room.media = media;
       room.currentIndex = 0;
-      room.queue = [media];  // Start new queue
+      room.queue = [media];
     }
-    io.to(roomCode).emit('media-updated', { media, queue: room.queue, currentIndex: room.currentIndex });
+    io.to(roomCode).emit('media-updated', { media: room.media, queue: room.queue, currentIndex: room.currentIndex });
   });
 
-  // Sync Controls (The Rave Magic)
+  // Sync Controls (Generic for YT/Spotify)
   socket.on('play', ({ roomCode, currentTime }) => {
     if (!rooms.has(roomCode) || !socket.rooms.has(roomCode)) return;
     if (rooms.get(roomCode).hostId !== socket.id) return;
 
     const timestamp = Date.now();
-    rooms.get(roomCode).isPlaying = true;
-    rooms.get(roomCode).currentTime = currentTime;
+    const room = rooms.get(roomCode);
+    room.isPlaying = true;
+    room.currentTime = currentTime;
 
-    // Broadcast with compensation
     io.to(roomCode).emit('sync-play', {
       currentTime,
       timestamp,
-      offset: 0 // Clients calculate: seekTo = currentTime + (now - timestamp)/1000
+      queue: room.queue,
+      currentIndex: room.currentIndex
     });
   });
 
@@ -186,7 +187,8 @@ io.on('connection', (socket) => {
     if (rooms.get(roomCode).hostId !== socket.id) return;
 
     const timestamp = Date.now();
-    rooms.get(roomCode).isPlaying = false;
+    const room = rooms.get(roomCode);
+    room.isPlaying = false;
 
     io.to(roomCode).emit('sync-pause', { timestamp });
   });
@@ -196,16 +198,25 @@ io.on('connection', (socket) => {
     if (rooms.get(roomCode).hostId !== socket.id) return;
 
     const timestamp = Date.now();
-    rooms.get(roomCode).currentTime = newTime;
+    const room = rooms.get(roomCode);
+    room.currentTime = newTime;
 
     io.to(roomCode).emit('sync-seek', { newTime, timestamp });
   });
 
-    socket.on('next-video', ({ roomCode }) => {
+  // Spotify Sync (Broadcast state)
+  socket.on('spotify-sync', ({ roomCode, state }) => {
+    if (!rooms.has(roomCode) || !socket.rooms.has(roomCode)) return;
+    io.to(roomCode).emit('spotify-sync', { state });
+  });
+
+  // Queue Navigation
+  socket.on('next-video', ({ roomCode }) => {
     if (!rooms.has(roomCode) || !socket.rooms.has(roomCode)) return;
     if (rooms.get(roomCode).hostId !== socket.id) return;
 
     const room = rooms.get(roomCode);
+    if (room.queue.length === 0) return;
     room.currentIndex = (room.currentIndex + 1) % room.queue.length;
     room.media = room.queue[room.currentIndex];
     room.currentTime = 0;
@@ -220,6 +231,7 @@ io.on('connection', (socket) => {
     if (rooms.get(roomCode).hostId !== socket.id) return;
 
     const room = rooms.get(roomCode);
+    if (room.queue.length === 0) return;
     room.currentIndex = (room.currentIndex - 1 + room.queue.length) % room.queue.length;
     room.media = room.queue[room.currentIndex];
     room.currentTime = 0;
@@ -229,18 +241,17 @@ io.on('connection', (socket) => {
     io.to(roomCode).emit('sync-seek', { newTime: 0, timestamp: Date.now() });
   });
 
-  // Chat (fixed: proper user lookup from room data)
+  // Chat
   socket.on('send-chat', ({ roomCode, message, userName }) => {
     if (!rooms.has(roomCode) || !socket.rooms.has(roomCode)) return;
     
-    // Find user by socket ID
     const room = rooms.get(roomCode);
     const user = room.users.find(u => u.id === socket.id);
     
-    if (!user) return;  // Safety check
+    if (!user) return;
     
     const chatData = {
-      user: user.name,   // Pulled from stored user data
+      user: user.name,
       message,
       timestamp: Date.now()
     };
@@ -248,7 +259,7 @@ io.on('connection', (socket) => {
     io.to(roomCode).emit('new-chat', chatData);
   });
 
-  // Voice Signaling (WebRTC – Clients handle ICE/STUN)
+  // Voice Signaling (Optional)
   socket.on('voice-offer', ({ roomCode, offer, targetId }) => {
     socket.to(targetId).to(roomCode).emit('voice-offer', { offer, fromId: socket.id });
   });
@@ -263,14 +274,13 @@ io.on('connection', (socket) => {
 
   // Cleanup
   socket.on('disconnect', () => {
-    // Remove from all rooms
     for (const roomCode of Array.from(socket.rooms)) {
       if (rooms.has(roomCode) && roomCode !== socket.id) {
         const room = rooms.get(roomCode);
         room.users = room.users.filter(u => u.id !== socket.id);
         io.to(roomCode).emit('user-left', { id: socket.id });
         if (room.hostId === socket.id && room.users.length > 0) {
-          room.hostId = room.users[0].id; // Promote next user
+          room.hostId = room.users[0].id;
         }
         if (room.users.length === 0) rooms.delete(roomCode);
       }
@@ -282,7 +292,7 @@ io.on('connection', (socket) => {
 // Health Check
 app.get('/health', (req, res) => res.send('OK'));
 
-// Expose Room List (Optional API)
+// Expose Room List
 app.get('/rooms', (req, res) => {
   res.json(Array.from(rooms.keys()));
 });
@@ -296,4 +306,4 @@ server.listen(PORT, () => {
   }
 });
 
-module.exports = server; // For testing
+module.exports = server;
